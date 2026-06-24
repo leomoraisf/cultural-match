@@ -1,59 +1,60 @@
-import NextAuth, { NextAuthOptions } from "next-auth";
-import CredentialsProvider from "next-auth/providers/credentials";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
-export const authOptions: NextAuthOptions = {
-  providers: [
-    CredentialsProvider({
-      name: "credentials",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Senha", type: "password" },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
+function calcularScore(nichosArtista: string[], nichosEdital: string[]): number {
+  if (nichosEdital.length === 0) return 0;
+  const matches = nichosArtista.filter((n) => nichosEdital.includes(n)).length;
+  return Math.round((matches / nichosEdital.length) * 10000) / 100;
+}
 
-        const artista = await prisma.artista.findUnique({
-          where: { email: credentials.email },
-          include: { nichos: true },
+export async function GET(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || !session.user) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
+
+    const artistaId = (session.user as any).id as string;
+
+    const artista = await prisma.artista.findUnique({
+      where: { id: artistaId },
+      include: { nichos: true },
+    });
+
+    if (!artista) {
+      return NextResponse.json({ error: "Artista não encontrado" }, { status: 404 });
+    }
+
+    const nichosArtista = artista.nichos.map((n) => n.nicho);
+
+    const editais = await prisma.edital.findMany({
+      where: { status: "ABERTO" },
+      include: { nichos: true },
+    });
+
+    const matchesCalculados = await Promise.all(
+      editais.map(async (edital) => {
+        const nichosEdital = edital.nichos.map((n) => n.nicho);
+        const score = calcularScore(nichosArtista, nichosEdital);
+        if (score === 0) return null;
+        const match = await prisma.match.upsert({
+          where: { artistaId_editalId: { artistaId, editalId: edital.id } },
+          update: { score },
+          create: { artistaId, editalId: edital.id, score },
         });
+        return { ...match, edital };
+      })
+    );
 
-        if (!artista) return null;
+    const matches = matchesCalculados
+      .filter(Boolean)
+      .sort((a, b) => b!.score - a!.score);
 
-        const senhaCorreta = await bcrypt.compare(
-          credentials.password,
-          artista.password
-        );
-
-        if (!senhaCorreta) return null;
-
-        return {
-          id: artista.id,
-          name: artista.name,
-          email: artista.email,
-        };
-      },
-    }),
-  ],
-  callbacks: {
-    async jwt({ token, user }) {
-      if (user) token.id = user.id;
-      return token;
-    },
-    async session({ session, token }) {
-      if (token && session.user) (session.user as any).id = token.id as string;
-      return session;
-    },
-  },
-  pages: {
-    signIn: "/login",
-  },
-  session: {
-    strategy: "jwt",
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-};
-
-const handler = NextAuth(authOptions);
-export { handler as GET, handler as POST };
+    return NextResponse.json(matches);
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+  }
+}
