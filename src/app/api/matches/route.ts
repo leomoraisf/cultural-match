@@ -10,7 +10,10 @@ function calcularScore(
 ): number {
   if (nichosEdital.length === 0) return 0;
 
-  const matches = nichosArtista.filter((n) => nichosEdital.includes(n)).length;
+  const matches = nichosArtista.filter((n) =>
+    nichosEdital.includes(n)
+  ).length;
+
   const score = (matches / nichosEdital.length) * 100;
 
   return Math.round(score * 100) / 100;
@@ -19,11 +22,15 @@ function calcularScore(
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+
+    if (!session || !session.user) {
+      return NextResponse.json(
+        { error: "Não autorizado" },
+        { status: 401 }
+      );
     }
 
-    const artistaId = session.user.id;
+    const artistaId = (session.user as any).id as string;
 
     const artista = await prisma.artista.findUnique({
       where: { id: artistaId },
@@ -44,20 +51,27 @@ export async function GET(req: NextRequest) {
       include: { nichos: true },
     });
 
-    // Calcula e salva os matches
     const matchesCalculados = await Promise.all(
       editais.map(async (edital) => {
         const nichosEdital = edital.nichos.map((n) => n.nicho);
+
         const score = calcularScore(nichosArtista, nichosEdital);
 
         if (score === 0) return null;
 
         const match = await prisma.match.upsert({
           where: {
-            artistaId_editalId: { artistaId, editalId: edital.id },
+            artistaId_editalId: {
+              artistaId,
+              editalId: edital.id,
+            },
           },
           update: { score },
-          create: { artistaId, editalId: edital.id, score },
+          create: {
+            artistaId,
+            editalId: edital.id,
+            score,
+          },
         });
 
         return { ...match, edital };
@@ -71,6 +85,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(matches);
   } catch (error) {
     console.error(error);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Erro interno" },
+      { status: 500 }
+    );
   }
 }

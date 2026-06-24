@@ -1,60 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import NextAuth from "next-auth";
+import { authOptions } from "@/lib/auth";
 
-function calcularScore(nichosArtista: string[], nichosEdital: string[]): number {
-  if (nichosEdital.length === 0) return 0;
-  const matches = nichosArtista.filter((n) => nichosEdital.includes(n)).length;
-  return Math.round((matches / nichosEdital.length) * 10000) / 100;
-}
+const handler = NextAuth(authOptions);
 
-export async function GET(req: NextRequest) {
-  try {
-    const session = await getServerSession(authOptions);
-    if (!session || !session.user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
-
-    const artistaId = (session.user as any).id as string;
-
-    const artista = await prisma.artista.findUnique({
-      where: { id: artistaId },
-      include: { nichos: true },
-    });
-
-    if (!artista) {
-      return NextResponse.json({ error: "Artista não encontrado" }, { status: 404 });
-    }
-
-    const nichosArtista = artista.nichos.map((n) => n.nicho);
-
-    const editais = await prisma.edital.findMany({
-      where: { status: "ABERTO" },
-      include: { nichos: true },
-    });
-
-    const matchesCalculados = await Promise.all(
-      editais.map(async (edital) => {
-        const nichosEdital = edital.nichos.map((n) => n.nicho);
-        const score = calcularScore(nichosArtista, nichosEdital);
-        if (score === 0) return null;
-        const match = await prisma.match.upsert({
-          where: { artistaId_editalId: { artistaId, editalId: edital.id } },
-          update: { score },
-          create: { artistaId, editalId: edital.id, score },
-        });
-        return { ...match, edital };
-      })
-    );
-
-    const matches = matchesCalculados
-      .filter(Boolean)
-      .sort((a, b) => b!.score - a!.score);
-
-    return NextResponse.json(matches);
-  } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: "Erro interno" }, { status: 500 });
-  }
-}
+export { handler as GET, handler as POST };
