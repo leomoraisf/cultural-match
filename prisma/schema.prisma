@@ -1,13 +1,116 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum NichoArtistico {
+  MUSICA
+  TEATRO
+  AUDIOVISUAL
+  ARTES_VISUAIS
+  DANCA
+  LITERATURA
+  CIRCO
+  PATRIMONIO_CULTURAL
+  ARTESANATO
+  OUTROS
+}
+
+enum StatusEdital {
+  ABERTO
+  ENCERRADO
+  EM_BREVE
+}
+
+enum TipoEdital {
+  BOLSA
+  PATROCINIO
+  RESIDENCIA
+  PREMIO
+  CAPACITACAO
+  OUTROS
+}
+
+model Artista {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name     String
+  email    String  @unique
+  password String
+
+  bio          String?
+  cidade       String?
+  estado       String?
+  portfolioUrl String?
+
+  nichos  NichoArtista[]
+  matches Match[]
+
+  @@map("artistas")
+}
+
+model NichoArtista {
+  id        String         @id @default(cuid())
+  nicho     NichoArtistico
+  artistaId String
+
+  artista Artista @relation(fields: [artistaId], references: [id], onDelete: Cascade)
+
+  @@unique([artistaId, nicho])
+  @@map("nichos_artista")
+}
+
+model Edital {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  titulo         String
+  descricao      String
+  orgao          String
+  valorMaximo    Float?
+  dataAbertura   DateTime
+  dataFechamento DateTime
+  linkOriginal   String
+  status         StatusEdital @default(ABERTO)
+  tipo           TipoEdital
+
+  nichos  NichoEdital[]
+  matches Match[]
+
+  @@map("editais")
+}
+
+model NichoEdital {
+  id       String         @id @default(cuid())
+  nicho    NichoArtistico
+  editalId String
+
+  edital Edital @relation(fields: [editalId], references: [id], onDelete: Cascade)
+
+  @@unique([editalId, nicho])
+  @@map("nichos_edital")
+}
+
+model Match {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  score     Float
+
+  artistaId String
+  editalId  String
+
+  artista Artista @relation(fields: [artistaId], references: [id], onDelete: Cascade)
+  edital  Edital  @relation(fields: [editalId], references: [id], onDelete: Cascade)
+
+  @@unique([artistaId, editalId])
+  @@map("matches")
 }
